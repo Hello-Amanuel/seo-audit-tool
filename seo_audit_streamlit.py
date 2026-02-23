@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-WordPress SEO Audit Tool - Practical Edition
-Complete source URL listings for every issue - Perfect for WordPress sites
+Complete WordPress SEO Audit Tool with AI Content Analysis
+Chrome Extension Level Detail + OpenAI Content Optimization
 """
 
 import streamlit as st
@@ -15,12 +15,12 @@ import json
 import time
 from datetime import datetime
 import warnings
-import io
+from typing import List, Dict
 warnings.filterwarnings('ignore')
 
 # Page configuration
 st.set_page_config(
-    page_title="WordPress SEO Audit Tool",
+    page_title="Complete SEO Audit Tool",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -55,73 +55,127 @@ st.markdown("""
     .score-poor {
         background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
     }
-    .url-list {
+    .meta-table {
         background: #f8f9fa;
-        padding: 0.5rem;
-        border-left: 4px solid #dc3545;
-        margin: 0.5rem 0;
-        border-radius: 4px;
+        padding: 1rem;
+        border-radius: 8px;
         font-family: monospace;
         font-size: 0.85rem;
+        max-height: 400px;
+        overflow-y: auto;
     }
-    .fix-badge {
-        background: #28a745;
-        color: white;
-        padding: 0.2rem 0.6rem;
-        border-radius: 12px;
-        font-size: 0.75rem;
+    .suggestion-box {
+        background: #e7f3ff;
+        border-left: 4px solid #2196F3;
+        padding: 1rem;
+        margin: 1rem 0;
+        border-radius: 4px;
+    }
+    .ai-suggestion {
+        background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+        border: 2px solid #667eea;
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+    }
+    .keyword-badge {
         display: inline-block;
-    }
-    .wp-badge {
-        background: #21759b;
+        background: #667eea;
         color: white;
         padding: 0.3rem 0.8rem;
-        border-radius: 15px;
-        font-size: 0.8rem;
-        display: inline-block;
         margin: 0.2rem;
+        border-radius: 15px;
+        font-size: 0.85rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
-class WordPressSEOAuditor:
-    def __init__(self, url):
+class CompleteSEOAuditor:
+    def __init__(self, url, openai_api_key=None):
         self.url = url
         self.domain = urlparse(url).netloc
         self.soup = None
         self.response = None
         self.html_content = ""
+        self.openai_api_key = openai_api_key
+        
         self.results = {
             'url': url,
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'overall_score': 0,
-            'issues': [],
-            'passed_checks': [],
+            
+            # Basic Info
+            'title': '',
+            'title_length': 0,
+            'meta_description': '',
+            'meta_description_length': 0,
+            'canonical': '',
+            'robots': '',
+            'lang': '',
+            
+            # All Meta Tags (like Chrome extension)
+            'all_metas': [],
+            'all_links': [],
+            'all_scripts': [],
+            
+            # Headers
+            'headers_structure': [],
+            'h1_count': 0,
+            'h1_list': [],
+            
+            # Images
+            'total_images': 0,
+            'images_with_alt': 0,
+            'images_without_alt': [],
+            'images_without_title': [],
+            
+            # Links
+            'total_links': 0,
+            'internal_links': [],
+            'external_links': [],
+            'broken_links': [],
+            'anchor_links': [],
+            
+            # Open Graph
+            'og_tags': {},
+            
+            # Twitter Cards
+            'twitter_tags': {},
+            
+            # Schema.org
+            'schema_json_ld': [],
+            'schema_microdata': [],
+            
+            # WordPress
             'wordpress_detected': False,
             'wordpress_version': None,
-            'wordpress_plugins': [],
             'wordpress_theme': None,
-            # Detailed listings for WordPress fixes
-            'images_missing_alt': [],
-            'images_empty_alt': [],
-            'images_no_title': [],
-            'images_large_size': [],
-            'images_non_webp': [],
-            'broken_links': [],
-            'internal_links_list': [],
-            'external_links_list': [],
-            'h1_tags_list': [],
-            'all_headings': [],
-            'pages_to_noindex': [],
-            'missing_schema_opportunities': [],
-            'slow_resources': []
+            'wordpress_plugins': [],
+            
+            # Content Analysis
+            'word_count': 0,
+            'paragraph_count': 0,
+            'sentence_count': 0,
+            'content_text': '',
+            'keyword_density': [],
+            
+            # AI Suggestions
+            'suggested_title': '',
+            'suggested_description': '',
+            'suggested_keywords': [],
+            'content_improvements': [],
+            'ai_content_score': 0,
+            
+            # Issues
+            'issues': [],
+            'passed_checks': []
         }
-        
+    
     def fetch_page(self):
         """Fetch webpage"""
         try:
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
             
             self.response = requests.get(self.url, headers=headers, timeout=15, verify=False, allow_redirects=True)
@@ -133,656 +187,636 @@ class WordPressSEOAuditor:
             st.error(f"❌ Failed to fetch page: {str(e)}")
             return False
     
-    def detect_wordpress(self):
-        """Detect if site is WordPress and get version"""
-        # Check for WordPress generator meta tag
-        generator = self.soup.find('meta', attrs={'name': 'generator'})
-        if generator:
-            content = generator.get('content', '')
-            if 'WordPress' in content:
-                self.results['wordpress_detected'] = True
-                # Extract version
-                version_match = re.search(r'WordPress ([\d.]+)', content)
-                if version_match:
-                    self.results['wordpress_version'] = version_match.group(1)
+    def extract_all_metas(self):
+        """Extract ALL meta tags (like Chrome extension)"""
+        metas = self.soup.find_all('meta')
         
-        # Check for wp-content in HTML
-        if 'wp-content' in self.html_content or 'wp-includes' in self.html_content:
-            self.results['wordpress_detected'] = True
-        
-        # Detect theme
-        theme_match = re.search(r'/wp-content/themes/([^/]+)/', self.html_content)
-        if theme_match:
-            self.results['wordpress_theme'] = theme_match.group(1)
-        
-        # Detect common plugins
-        plugin_patterns = [
-            r'/wp-content/plugins/([^/]+)/',
-            r'wp-content/plugins/([^/\'"]+)'
-        ]
-        
-        plugins = set()
-        for pattern in plugin_patterns:
-            matches = re.findall(pattern, self.html_content)
-            plugins.update(matches)
-        
-        self.results['wordpress_plugins'] = list(plugins)[:20]  # Limit to 20
+        for meta in metas:
+            meta_data = {}
+            
+            # Get meta attributes
+            if meta.get('charset'):
+                meta_data = {'type': 'charset', 'value': meta.get('charset')}
+            elif meta.get('name'):
+                meta_data = {
+                    'type': 'name',
+                    'name': meta.get('name'),
+                    'content': meta.get('content', '')
+                }
+            elif meta.get('property'):
+                meta_data = {
+                    'type': 'property',
+                    'property': meta.get('property'),
+                    'content': meta.get('content', '')
+                }
+            elif meta.get('http-equiv'):
+                meta_data = {
+                    'type': 'http-equiv',
+                    'http-equiv': meta.get('http-equiv'),
+                    'content': meta.get('content', '')
+                }
+            
+            if meta_data:
+                self.results['all_metas'].append(meta_data)
     
-    def check_images_detailed(self):
-        """Comprehensive image check with full URLs"""
-        images = self.soup.find_all('img')
+    def extract_all_links(self):
+        """Extract ALL link tags (like Chrome extension)"""
+        links = self.soup.find_all('link')
         
-        if not images:
-            return
+        for link in links:
+            link_data = {
+                'rel': ' '.join(link.get('rel', [])),
+                'href': link.get('href', ''),
+                'type': link.get('type', ''),
+                'sizes': link.get('sizes', ''),
+                'media': link.get('media', '')
+            }
+            self.results['all_links'].append(link_data)
+    
+    def extract_all_scripts(self):
+        """Extract ALL script tags"""
+        scripts = self.soup.find_all('script')
+        
+        for script in scripts:
+            script_data = {
+                'type': script.get('type', ''),
+                'src': script.get('src', ''),
+                'async': script.has_attr('async'),
+                'defer': script.has_attr('defer'),
+                'size': len(script.string) if script.string else 0
+            }
+            self.results['all_scripts'].append(script_data)
+    
+    def check_basic_seo(self):
+        """Check basic SEO elements"""
+        # Title
+        title = self.soup.find('title')
+        if title:
+            self.results['title'] = title.get_text().strip()
+            self.results['title_length'] = len(self.results['title'])
+        
+        # Meta Description
+        meta_desc = self.soup.find('meta', attrs={'name': 'description'})
+        if meta_desc:
+            self.results['meta_description'] = meta_desc.get('content', '').strip()
+            self.results['meta_description_length'] = len(self.results['meta_description'])
+        
+        # Canonical
+        canonical = self.soup.find('link', rel='canonical')
+        if canonical:
+            self.results['canonical'] = canonical.get('href', '')
+        
+        # Robots
+        robots = self.soup.find('meta', attrs={'name': 'robots'})
+        if robots:
+            self.results['robots'] = robots.get('content', '')
+        
+        # Language
+        html_tag = self.soup.find('html')
+        if html_tag:
+            self.results['lang'] = html_tag.get('lang', '')
+    
+    def analyze_headers(self):
+        """Analyze all heading tags"""
+        for level in range(1, 7):
+            tags = self.soup.find_all(f'h{level}')
+            for tag in tags:
+                text = tag.get_text().strip()
+                self.results['headers_structure'].append({
+                    'level': f'H{level}',
+                    'text': text,
+                    'length': len(text),
+                    'html': str(tag)[:200]
+                })
+                
+                if level == 1:
+                    self.results['h1_count'] += 1
+                    self.results['h1_list'].append(text)
+    
+    def analyze_images(self):
+        """Detailed image analysis"""
+        images = self.soup.find_all('img')
+        self.results['total_images'] = len(images)
         
         for img in images:
             src = img.get('src', '')
             if not src:
                 continue
             
-            # Make absolute URL
             full_url = urljoin(self.url, src)
-            
             alt = img.get('alt')
             title = img.get('title')
-            width = img.get('width')
-            height = img.get('height')
             
-            # Get parent context (for WordPress, often in <figure> or <div>)
-            parent = img.parent
-            parent_class = parent.get('class', []) if parent else []
-            parent_id = parent.get('id', '') if parent else ''
-            
-            # Check alt text
-            if alt is None:
-                self.results['images_missing_alt'].append({
+            if alt is not None and alt.strip():
+                self.results['images_with_alt'] += 1
+            else:
+                self.results['images_without_alt'].append({
                     'url': full_url,
-                    'html': str(img)[:200],
-                    'parent_class': ' '.join(parent_class) if parent_class else 'none',
-                    'parent_id': parent_id,
-                    'location': f"Check WordPress Media Library or post content"
-                })
-            elif not alt.strip():
-                self.results['images_empty_alt'].append({
-                    'url': full_url,
-                    'current_alt': '',
                     'html': str(img)[:200]
                 })
             
-            # Check title
             if not title:
-                self.results['images_no_title'].append({
+                self.results['images_without_title'].append({
                     'url': full_url,
                     'has_alt': bool(alt and alt.strip())
                 })
-            
-            # Check size
-            if width and height:
-                try:
-                    w = int(width)
-                    h = int(height)
-                    if w > 2000 or h > 2000:
-                        self.results['images_large_size'].append({
-                            'url': full_url,
-                            'width': w,
-                            'height': h,
-                            'recommendation': f'Resize to max 1920x1920 or use WordPress responsive images'
-                        })
-                except:
-                    pass
-            
-            # Check format
-            file_ext = full_url.lower().split('?')[0].split('.')[-1]
-            if file_ext in ['jpg', 'jpeg', 'png'] and 'webp' not in full_url.lower():
-                self.results['images_non_webp'].append({
-                    'url': full_url,
-                    'current_format': file_ext,
-                    'recommendation': 'Convert to WebP using plugin like "WebP Converter for Media"'
-                })
-        
-        # Create issues based on findings
-        if self.results['images_missing_alt']:
-            self.results['issues'].append({
-                'severity': 'CRITICAL',
-                'category': 'Images & Media',
-                'issue': f"{len(self.results['images_missing_alt'])} images missing alt text",
-                'count': len(self.results['images_missing_alt']),
-                'wordpress_fix': [
-                    '1. Go to WordPress Media Library',
-                    '2. Click on each image',
-                    '3. Add descriptive "Alternative Text"',
-                    '4. Or use plugin: "Auto Image Alt Text"'
-                ],
-                'bulk_fix': 'Use SEO plugin like Rank Math or Yoast to find and fix all at once',
-                'details_key': 'images_missing_alt'
-            })
-        
-        if self.results['images_non_webp']:
-            self.results['issues'].append({
-                'severity': 'MEDIUM',
-                'category': 'Performance',
-                'issue': f"{len(self.results['images_non_webp'])} images not using WebP format",
-                'count': len(self.results['images_non_webp']),
-                'wordpress_fix': [
-                    'Install plugin: "WebP Converter for Media"',
-                    'Or "Imagify" or "ShortPixel"',
-                    'Enable automatic WebP conversion',
-                    'Regenerate thumbnails'
-                ],
-                'benefit': 'Can reduce image size by 25-35%',
-                'details_key': 'images_non_webp'
-            })
-        
-        if self.results['images_large_size']:
-            self.results['issues'].append({
-                'severity': 'HIGH',
-                'category': 'Performance',
-                'issue': f"{len(self.results['images_large_size'])} oversized images detected",
-                'count': len(self.results['images_large_size']),
-                'wordpress_fix': [
-                    'Install plugin: "Regenerate Thumbnails"',
-                    'Or manually resize in WordPress Media Library',
-                    'Set max image dimensions in Settings > Media'
-                ],
-                'details_key': 'images_large_size'
-            })
     
-    def check_links_detailed(self):
-        """Detailed link analysis with full URLs"""
+    def analyze_links(self):
+        """Complete link analysis"""
         links = self.soup.find_all('a', href=True)
+        self.results['total_links'] = len(links)
         
         for link in links:
             href = link.get('href', '').strip()
             anchor_text = link.get_text().strip()
-            rel = link.get('rel', [])
             
             if not href:
-                self.results['broken_links'].append({
-                    'type': 'Empty href',
-                    'url': '',
-                    'anchor_text': anchor_text or '[No anchor text]',
-                    'html': str(link)[:150],
-                    'fix': 'Remove this link or add proper URL'
+                continue
+            
+            # Anchor links
+            if href.startswith('#'):
+                self.results['anchor_links'].append({
+                    'href': href,
+                    'anchor_text': anchor_text
                 })
                 continue
             
-            # Skip anchors and javascript
-            if href.startswith('#') or href.startswith('javascript:') or href.startswith('mailto:') or href.startswith('tel:'):
+            # Skip mailto and tel
+            if href.startswith(('mailto:', 'tel:', 'javascript:')):
                 continue
             
-            # Make absolute URL
             full_url = urljoin(self.url, href)
             parsed = urlparse(full_url)
-            
-            # Classify as internal or external
-            is_internal = parsed.netloc == self.domain or not parsed.netloc
             
             link_data = {
                 'url': full_url,
                 'anchor_text': anchor_text[:100] if anchor_text else '[No anchor text]',
-                'nofollow': 'nofollow' in rel,
+                'rel': link.get('rel', []),
                 'target': link.get('target', '_self'),
-                'location_in_page': self.get_link_location(link)
+                'title': link.get('title', '')
             }
             
-            if is_internal:
-                self.results['internal_links_list'].append(link_data)
+            # Classify
+            if parsed.netloc == self.domain or not parsed.netloc:
+                self.results['internal_links'].append(link_data)
             else:
-                self.results['external_links_list'].append(link_data)
-            
-            # Check for broken patterns
-            if href == '#' or href == '/' or href == '':
-                self.results['broken_links'].append({
-                    'type': 'Invalid link',
-                    'url': href,
-                    'anchor_text': anchor_text,
-                    'fix': 'Update or remove this link in WordPress editor'
-                })
+                self.results['external_links'].append(link_data)
+    
+    def extract_og_tags(self):
+        """Extract Open Graph tags"""
+        og_metas = self.soup.find_all('meta', property=re.compile('^og:'))
         
-        # Create issues
-        if self.results['broken_links']:
-            self.results['issues'].append({
-                'severity': 'HIGH',
-                'category': 'Links',
-                'issue': f"{len(self.results['broken_links'])} broken or empty links found",
-                'count': len(self.results['broken_links']),
-                'wordpress_fix': [
-                    'Install plugin: "Broken Link Checker"',
-                    'It will automatically find and notify you of broken links',
-                    'Or manually search and fix in WordPress editor'
-                ],
-                'details_key': 'broken_links'
-            })
+        for meta in og_metas:
+            prop = meta.get('property', '')
+            content = meta.get('content', '')
+            self.results['og_tags'][prop] = content
+    
+    def extract_twitter_tags(self):
+        """Extract Twitter Card tags"""
+        twitter_metas = self.soup.find_all('meta', attrs={'name': re.compile('^twitter:')})
         
-        if len(self.results['internal_links_list']) < 3:
-            self.results['issues'].append({
-                'severity': 'MEDIUM',
-                'category': 'Internal Linking',
-                'issue': f"Only {len(self.results['internal_links_list'])} internal links found",
-                'wordpress_fix': [
-                    'Add 3-5 internal links to related posts/pages',
-                    'Use WordPress "Insert link" button in editor',
-                    'Or use plugin: "Internal Link Juicer" for automatic linking'
-                ],
-                'benefit': 'Improves SEO and helps visitors navigate your site'
+        for meta in twitter_metas:
+            name = meta.get('name', '')
+            content = meta.get('content', '')
+            self.results['twitter_tags'][name] = content
+    
+    def extract_schema(self):
+        """Extract Schema.org markup"""
+        # JSON-LD
+        json_ld_scripts = self.soup.find_all('script', type='application/ld+json')
+        for script in json_ld_scripts:
+            try:
+                data = json.loads(script.string)
+                self.results['schema_json_ld'].append(data)
+            except:
+                pass
+        
+        # Microdata
+        items = self.soup.find_all(attrs={'itemtype': True})
+        for item in items:
+            self.results['schema_microdata'].append({
+                'itemtype': item.get('itemtype', ''),
+                'html': str(item)[:200]
             })
     
-    def get_link_location(self, link):
-        """Determine where in the page the link is"""
-        parent = link.parent
-        locations = []
+    def detect_wordpress(self):
+        """Detect WordPress"""
+        # Generator meta
+        generator = self.soup.find('meta', attrs={'name': 'generator'})
+        if generator:
+            content = generator.get('content', '')
+            if 'WordPress' in content:
+                self.results['wordpress_detected'] = True
+                version_match = re.search(r'WordPress ([\d.]+)', content)
+                if version_match:
+                    self.results['wordpress_version'] = version_match.group(1)
         
-        # Check parents
-        for _ in range(5):  # Check up to 5 levels
-            if not parent:
-                break
-            
-            if parent.name == 'nav':
-                return 'Navigation Menu'
-            elif parent.name == 'header':
-                return 'Header'
-            elif parent.name == 'footer':
-                return 'Footer'
-            elif parent.name == 'aside':
-                return 'Sidebar'
-            elif parent.name == 'article' or parent.name == 'main':
-                return 'Main Content'
-            
-            # Check for common WordPress classes
-            classes = parent.get('class', [])
-            if any('menu' in c for c in classes):
-                return 'Menu'
-            if any('widget' in c for c in classes):
-                return 'Widget'
-            if any('footer' in c for c in classes):
-                return 'Footer'
-            
-            parent = parent.parent
+        # wp-content
+        if 'wp-content' in self.html_content:
+            self.results['wordpress_detected'] = True
         
-        return 'Content Area'
+        # Theme
+        theme_match = re.search(r'/wp-content/themes/([^/]+)/', self.html_content)
+        if theme_match:
+            self.results['wordpress_theme'] = theme_match.group(1)
+        
+        # Plugins
+        plugin_matches = re.findall(r'/wp-content/plugins/([^/]+)/', self.html_content)
+        self.results['wordpress_plugins'] = list(set(plugin_matches))[:30]
     
-    def check_headings_detailed(self):
-        """Detailed heading analysis"""
-        for i in range(1, 7):
-            tags = self.soup.find_all(f'h{i}')
-            for tag in tags:
-                text = tag.get_text().strip()
-                self.results['all_headings'].append({
-                    'level': f'H{i}',
-                    'text': text,
-                    'length': len(text),
-                    'parent_class': ' '.join(tag.parent.get('class', [])) if tag.parent else '',
-                    'html': str(tag)[:200]
-                })
+    def analyze_content(self):
+        """Content analysis for keyword extraction"""
+        # Remove non-content elements
+        for element in self.soup(['script', 'style', 'nav', 'footer', 'header', 'aside']):
+            element.decompose()
         
-        # Check H1 specifically
-        h1_tags = self.soup.find_all('h1')
+        # Get main content
+        main_content = self.soup.find('main') or self.soup.find('article') or self.soup.find('body')
         
-        for h1 in h1_tags:
-            self.results['h1_tags_list'].append({
-                'text': h1.get_text().strip(),
-                'html': str(h1)[:200]
-            })
-        
-        if not h1_tags:
-            self.results['issues'].append({
-                'severity': 'CRITICAL',
-                'category': 'Content Structure',
-                'issue': "Missing H1 heading",
-                'wordpress_fix': [
-                    'Edit your page/post in WordPress',
-                    'Make sure your main title uses "Heading 1" format',
-                    'In Block Editor: Select title block → Set to H1',
-                    'In Classic Editor: Select text → Choose "Heading 1" from dropdown'
-                ],
-                'seo_impact': 'H1 tells search engines the main topic of your page'
-            })
-        elif len(h1_tags) > 1:
-            self.results['issues'].append({
-                'severity': 'HIGH',
-                'category': 'Content Structure',
-                'issue': f"Multiple H1 headings found ({len(h1_tags)})",
-                'count': len(h1_tags),
-                'wordpress_fix': [
-                    'Keep only ONE H1 per page (usually your main title)',
-                    'Change other H1s to H2 or H3',
-                    'In WordPress editor: Select heading → Change format'
-                ],
-                'details_key': 'h1_tags_list'
-            })
-    
-    def check_meta_tags(self):
-        """Check meta tags with WordPress-specific advice"""
-        title = self.soup.find('title')
-        meta_desc = self.soup.find('meta', attrs={'name': 'description'})
-        
-        if not title or not title.get_text().strip():
-            self.results['issues'].append({
-                'severity': 'CRITICAL',
-                'category': 'Meta Tags',
-                'issue': "Missing or empty title tag",
-                'wordpress_fix': [
-                    'Install SEO plugin: Rank Math, Yoast SEO, or All in One SEO',
-                    'Edit page/post → Scroll to SEO section',
-                    'Fill in "SEO Title" field',
-                    'Keep it 50-60 characters'
-                ],
-                'plugin_recommendation': 'Rank Math (Free) - Most comprehensive',
-                'current': str(title) if title else 'None'
-            })
+        if main_content:
+            text = main_content.get_text()
         else:
-            title_text = title.get_text().strip()
-            title_length = len(title_text)
-            
-            if title_length < 30 or title_length > 60:
-                self.results['issues'].append({
-                    'severity': 'MEDIUM',
-                    'category': 'Meta Tags',
-                    'issue': f"Title length not optimal ({title_length} characters)",
-                    'current_title': title_text,
-                    'target': '50-60 characters',
-                    'wordpress_fix': [
-                        'Edit page in WordPress',
-                        'Update SEO Title in your SEO plugin',
-                        f'Current: {title_length} chars, Target: 50-60 chars'
-                    ]
-                })
+            text = self.soup.get_text()
         
-        if not meta_desc:
-            self.results['issues'].append({
-                'severity': 'CRITICAL',
-                'category': 'Meta Tags',
-                'issue': "Missing meta description",
-                'wordpress_fix': [
-                    'Install SEO plugin (Rank Math/Yoast)',
-                    'Edit page/post',
-                    'Fill in "Meta Description" field',
-                    'Keep it 150-160 characters',
-                    'Include primary keyword and call-to-action'
-                ],
-                'example': 'Discover authentic Omo Valley tours. Experience Ethiopian culture with expert guides. Book your adventure today!'
-            })
-        else:
-            desc_text = meta_desc.get('content', '').strip()
-            desc_length = len(desc_text)
-            
-            if desc_length < 120 or desc_length > 160:
-                self.results['issues'].append({
-                    'severity': 'MEDIUM',
-                    'category': 'Meta Tags',
-                    'issue': f"Meta description length not optimal ({desc_length} characters)",
-                    'current_description': desc_text,
-                    'target': '150-160 characters',
-                    'wordpress_fix': [
-                        'Edit in SEO plugin',
-                        f'Adjust from {desc_length} to 150-160 characters'
-                    ]
-                })
+        # Clean text
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        text = ' '.join(chunk for chunk in chunks if chunk)
+        
+        self.results['content_text'] = text
+        
+        # Word count
+        words = text.split()
+        self.results['word_count'] = len(words)
+        
+        # Sentences
+        sentences = re.split(r'[.!?]+', text)
+        self.results['sentence_count'] = len([s for s in sentences if s.strip()])
+        
+        # Paragraphs
+        self.results['paragraph_count'] = len(self.soup.find_all('p'))
+        
+        # Extract keywords
+        self.extract_keywords()
     
-    def check_wordpress_specific(self):
-        """WordPress-specific SEO checks"""
+    def extract_keywords(self):
+        """Extract keywords from content"""
+        text = self.results['content_text'].lower()
         
-        # Check for SEO plugins
-        seo_plugins = []
-        common_seo_plugins = {
-            'wordpress-seo': 'Yoast SEO',
-            'all-in-one-seo-pack': 'All in One SEO',
-            'seo-by-rank-math': 'Rank Math',
-            'wp-seopress': 'SEOPress'
+        # Stop words
+        stop_words = {
+            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
+            'of', 'with', 'is', 'was', 'are', 'were', 'been', 'be', 'have', 'has',
+            'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may',
+            'might', 'can', 'this', 'that', 'these', 'those', 'i', 'you', 'he',
+            'she', 'it', 'we', 'they', 'their', 'them', 'from', 'by', 'not', 'as'
         }
         
-        for plugin_slug, plugin_name in common_seo_plugins.items():
-            if plugin_slug in ' '.join(self.results['wordpress_plugins']):
-                seo_plugins.append(plugin_name)
+        # Clean words
+        words = re.findall(r'\b[a-z]{3,}\b', text)
+        clean_words = [w for w in words if w not in stop_words]
         
-        if not seo_plugins:
-            self.results['issues'].append({
+        # Single keywords
+        word_freq = Counter(clean_words)
+        
+        # 2-word phrases
+        phrases_2 = []
+        for i in range(len(words) - 1):
+            if words[i] not in stop_words and words[i+1] not in stop_words:
+                phrase = f"{words[i]} {words[i+1]}"
+                phrases_2.append(phrase)
+        
+        phrase_2_freq = Counter(phrases_2)
+        
+        # 3-word phrases
+        phrases_3 = []
+        for i in range(len(words) - 2):
+            if (words[i] not in stop_words and 
+                words[i+1] not in stop_words and 
+                words[i+2] not in stop_words):
+                phrase = f"{words[i]} {words[i+1]} {words[i+2]}"
+                phrases_3.append(phrase)
+        
+        phrase_3_freq = Counter(phrases_3)
+        
+        # Combine results
+        total_words = len(words)
+        
+        keyword_data = []
+        
+        # Top single keywords
+        for word, count in word_freq.most_common(15):
+            keyword_data.append({
+                'keyword': word,
+                'type': 'single',
+                'count': count,
+                'density': f"{(count/total_words*100):.2f}%"
+            })
+        
+        # Top 2-word phrases
+        for phrase, count in phrase_2_freq.most_common(10):
+            if count >= 2:  # At least 2 occurrences
+                keyword_data.append({
+                    'keyword': phrase,
+                    'type': '2-word',
+                    'count': count,
+                    'density': f"{(count/total_words*100):.2f}%"
+                })
+        
+        # Top 3-word phrases
+        for phrase, count in phrase_3_freq.most_common(5):
+            if count >= 2:
+                keyword_data.append({
+                    'keyword': phrase,
+                    'type': '3-word',
+                    'count': count,
+                    'density': f"{(count/total_words*100):.2f}%"
+                })
+        
+        self.results['keyword_density'] = keyword_data
+    
+    def generate_ai_suggestions(self):
+        """Generate AI-powered suggestions using OpenAI"""
+        if not self.openai_api_key:
+            return
+        
+        try:
+            # Prepare content summary
+            content_summary = self.results['content_text'][:3000]  # First 3000 chars
+            
+            # Create prompt
+            prompt = f"""You are an expert SEO consultant analyzing a webpage in 2026. 
+
+Current Page Info:
+- URL: {self.url}
+- Current Title: {self.results['title']}
+- Current Description: {self.results['meta_description']}
+- Word Count: {self.results['word_count']}
+- H1: {', '.join(self.results['h1_list'])}
+
+Content Sample:
+{content_summary}
+
+Current Top Keywords:
+{', '.join([kw['keyword'] for kw in self.results['keyword_density'][:10]])}
+
+Please provide:
+
+1. SUGGESTED_TITLE: A compelling, SEO-optimized title (50-60 chars)
+2. SUGGESTED_DESCRIPTION: An engaging meta description (150-160 chars)
+3. SUGGESTED_KEYWORDS: 10 primary keywords/phrases (comma-separated)
+4. CONTENT_IMPROVEMENTS: 5 specific improvements for 2026 SEO standards
+5. CONTENT_SCORE: Rate content quality 0-100
+
+Format your response as JSON:
+{
+  "suggested_title": "...",
+  "suggested_description": "...",
+  "suggested_keywords": ["keyword1", "keyword2", ...],
+  "content_improvements": ["improvement1", "improvement2", ...],
+  "content_score": 85
+}"""
+
+            # Call OpenAI API
+            headers = {
+                'Authorization': f'Bearer {self.openai_api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            data = {
+                'model': 'gpt-4o-mini',
+                'messages': [
+                    {'role': 'system', 'content': 'You are an expert SEO consultant specializing in 2026 best practices.'},
+                    {'role': 'user', 'content': prompt}
+                ],
+                'temperature': 0.7,
+                'max_tokens': 1000
+            }
+            
+            response = requests.post(
+                'https://api.openai.com/v1/chat/completions',
+                headers=headers,
+                json=data,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                ai_response = result['choices'][0]['message']['content']
+                
+                # Parse JSON response
+                try:
+                    # Extract JSON from response
+                    json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
+                    if json_match:
+                        ai_data = json.loads(json_match.group())
+                        
+                        self.results['suggested_title'] = ai_data.get('suggested_title', '')
+                        self.results['suggested_description'] = ai_data.get('suggested_description', '')
+                        self.results['suggested_keywords'] = ai_data.get('suggested_keywords', [])
+                        self.results['content_improvements'] = ai_data.get('content_improvements', [])
+                        self.results['ai_content_score'] = ai_data.get('content_score', 0)
+                except:
+                    # If JSON parsing fails, extract manually
+                    pass
+        
+        except Exception as e:
+            st.warning(f"AI analysis skipped: {str(e)}")
+    
+    def generate_fallback_suggestions(self):
+        """Generate suggestions without AI"""
+        # Extract main topic from content
+        if self.results['keyword_density']:
+            top_keywords = [kw['keyword'] for kw in self.results['keyword_density'][:5]]
+            main_topic = top_keywords[0] if top_keywords else ''
+            
+            # Generate title suggestion
+            if not self.results['suggested_title']:
+                if main_topic:
+                    self.results['suggested_title'] = f"Ultimate {main_topic.title()} Guide | {self.domain.split('.')[0].title()}"
+            
+            # Generate description suggestion
+            if not self.results['suggested_description']:
+                if main_topic and len(top_keywords) >= 3:
+                    self.results['suggested_description'] = f"Discover everything about {main_topic}. Expert insights on {top_keywords[1]}, {top_keywords[2]}, and more. Get started today!"
+            
+            # Suggest keywords
+            if not self.results['suggested_keywords']:
+                self.results['suggested_keywords'] = top_keywords[:10]
+    
+    def identify_issues(self):
+        """Identify SEO issues"""
+        issues = []
+        
+        # Title issues
+        if not self.results['title']:
+            issues.append({
+                'severity': 'CRITICAL',
+                'category': 'Meta Tags',
+                'issue': 'Missing title tag',
+                'fix': f"<title>{self.results['suggested_title'] or 'Your Page Title Here'}</title>"
+            })
+        elif self.results['title_length'] < 30 or self.results['title_length'] > 60:
+            issues.append({
                 'severity': 'HIGH',
-                'category': 'WordPress Setup',
-                'issue': "No SEO plugin detected",
-                'wordpress_fix': [
-                    'Install one of these SEO plugins:',
-                    '• Rank Math (Recommended - Free & comprehensive)',
-                    '• Yoast SEO (Popular - Freemium)',
-                    '• All in One SEO (User-friendly)',
-                    '',
-                    'How to install:',
-                    '1. Go to Plugins → Add New',
-                    '2. Search for "Rank Math"',
-                    '3. Click Install → Activate',
-                    '4. Follow setup wizard'
-                ],
-                'benefit': 'SEO plugins help optimize every page automatically'
+                'category': 'Meta Tags',
+                'issue': f"Title length not optimal ({self.results['title_length']} chars)",
+                'current': self.results['title'],
+                'suggested': self.results['suggested_title'],
+                'target': '50-60 characters'
             })
         
-        # Check for caching
-        caching_plugins = ['wp-rocket', 'w3-total-cache', 'wp-super-cache', 'wp-fastest-cache', 'litespeed-cache']
-        has_caching = any(plugin in ' '.join(self.results['wordpress_plugins']) for plugin in caching_plugins)
-        
-        if not has_caching:
-            self.results['issues'].append({
-                'severity': 'MEDIUM',
-                'category': 'WordPress Performance',
-                'issue': "No caching plugin detected",
-                'wordpress_fix': [
-                    'Install a caching plugin:',
-                    '• WP Rocket (Premium - Best performance)',
-                    '• LiteSpeed Cache (Free - If using LiteSpeed server)',
-                    '• W3 Total Cache (Free)',
-                    '',
-                    'Installation:',
-                    'Plugins → Add New → Search → Install → Activate'
-                ],
-                'benefit': 'Caching can improve page speed by 50-70%'
-            })
-        
-        # Check for image optimization plugins
-        image_plugins = ['ewww-image-optimizer', 'shortpixel', 'imagify', 'smush', 'webp-converter']
-        has_image_optimizer = any(plugin in ' '.join(self.results['wordpress_plugins']) for plugin in image_plugins)
-        
-        if not has_image_optimizer and len(self.results['images_non_webp']) > 0:
-            self.results['issues'].append({
-                'severity': 'MEDIUM',
-                'category': 'WordPress Performance',
-                'issue': "No image optimization plugin detected",
-                'wordpress_fix': [
-                    'Install image optimization plugin:',
-                    '• WebP Converter for Media (Free - WebP conversion)',
-                    '• ShortPixel (Freemium - Compression + WebP)',
-                    '• Imagify (Freemium - Auto optimization)',
-                    '',
-                    'After installing:',
-                    '1. Configure settings',
-                    '2. Bulk optimize existing images',
-                    '3. Enable auto-optimization for new uploads'
-                ]
-            })
-    
-    def check_performance(self):
-        """Performance checks"""
-        if self.response:
-            load_time = self.response.elapsed.total_seconds()
-            page_size = len(self.response.content) / 1024  # KB
-            
-            if load_time > 3:
-                self.results['issues'].append({
-                    'severity': 'HIGH',
-                    'category': 'Performance',
-                    'issue': f"Slow page load time ({load_time:.2f} seconds)",
-                    'current': f'{load_time:.2f}s',
-                    'target': '< 3 seconds',
-                    'wordpress_fix': [
-                        '1. Install WP Rocket or LiteSpeed Cache',
-                        '2. Optimize images (use WebP Converter)',
-                        '3. Minify CSS/JS (in cache plugin settings)',
-                        '4. Enable lazy loading for images',
-                        '5. Use a CDN like Cloudflare (free)',
-                        '6. Remove unused plugins',
-                        '7. Use lightweight theme',
-                        '8. Upgrade hosting if needed'
-                    ],
-                    'test_tools': [
-                        'GTmetrix.com - Detailed performance report',
-                        'PageSpeed Insights - Google recommendations',
-                        'Pingdom - Speed test from multiple locations'
-                    ]
-                })
-            
-            if page_size > 1024:  # > 1MB
-                self.results['issues'].append({
-                    'severity': 'MEDIUM',
-                    'category': 'Performance',
-                    'issue': f"Large page size ({page_size:.0f} KB)",
-                    'current': f'{page_size:.0f} KB',
-                    'target': '< 1 MB',
-                    'wordpress_fix': [
-                        '1. Compress images before uploading',
-                        '2. Use image optimization plugin',
-                        '3. Lazy load images',
-                        '4. Minify CSS/JavaScript',
-                        '5. Remove unused plugins/themes'
-                    ]
-                })
-    
-    def check_mobile_optimization(self):
-        """Mobile optimization check"""
-        viewport = self.soup.find('meta', attrs={'name': 'viewport'})
-        
-        if not viewport:
-            self.results['issues'].append({
+        # Description issues
+        if not self.results['meta_description']:
+            issues.append({
                 'severity': 'CRITICAL',
-                'category': 'Mobile',
-                'issue': "Missing viewport meta tag",
-                'wordpress_fix': [
-                    'Most WordPress themes include this automatically',
-                    'If missing:',
-                    '1. Switch to a modern, responsive theme',
-                    '2. Or add to theme header.php:',
-                    '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
-                    '',
-                    'Recommended themes:',
-                    '• Astra (Free, fast, SEO-friendly)',
-                    '• GeneratePress (Lightweight)',
-                    '• Kadence (Modern, feature-rich)'
-                ],
-                'impact': 'Without this, your site won\'t be mobile-friendly (major ranking factor)'
+                'category': 'Meta Tags',
+                'issue': 'Missing meta description',
+                'fix': f'<meta name="description" content="{self.results["suggested_description"] or "Your description here"}">'
             })
-    
-    def check_https(self):
-        """HTTPS check"""
-        if not self.url.startswith('https://'):
-            self.results['issues'].append({
+        elif self.results['meta_description_length'] < 120 or self.results['meta_description_length'] > 160:
+            issues.append({
+                'severity': 'MEDIUM',
+                'category': 'Meta Tags',
+                'issue': f"Meta description length not optimal ({self.results['meta_description_length']} chars)",
+                'current': self.results['meta_description'],
+                'suggested': self.results['suggested_description'],
+                'target': '150-160 characters'
+            })
+        
+        # H1 issues
+        if self.results['h1_count'] == 0:
+            issues.append({
                 'severity': 'CRITICAL',
-                'category': 'Security',
-                'issue': "Site not using HTTPS",
-                'wordpress_fix': [
-                    '1. Get free SSL certificate:',
-                    '   • Contact your hosting provider (usually free)',
-                    '   • Most hosts: cPanel → SSL/TLS → Install Let\'s Encrypt',
-                    '',
-                    '2. Force HTTPS in WordPress:',
-                    '   • Install plugin: "Really Simple SSL"',
-                    '   • Activate it',
-                    '   • It handles everything automatically',
-                    '',
-                    '3. Update WordPress settings:',
-                    '   • Settings → General',
-                    '   • Change URLs from http:// to https://',
-                    '   • Save',
-                    '',
-                    '4. Update .htaccess to redirect HTTP to HTTPS'
-                ],
-                'impact': 'Google prioritizes HTTPS sites. Chrome shows HTTP as "Not Secure"',
-                'cost': 'Free with most hosting providers'
+                'category': 'Content Structure',
+                'issue': 'Missing H1 heading',
+                'fix': 'Add one H1 heading to your page'
             })
-    
-    def generate_wordpress_action_plan(self):
-        """Generate WordPress-specific action plan"""
-        action_plan = []
-        
-        # Group by priority
-        critical = [i for i in self.results['issues'] if i['severity'] == 'CRITICAL']
-        high = [i for i in self.results['issues'] if i['severity'] == 'HIGH']
-        medium = [i for i in self.results['issues'] if i['severity'] == 'MEDIUM']
-        
-        if critical:
-            action_plan.append({
-                'phase': 'URGENT - Do Today',
-                'priority': 'CRITICAL',
-                'tasks': critical,
-                'estimated_time': f'{len(critical) * 15} minutes'
+        elif self.results['h1_count'] > 1:
+            issues.append({
+                'severity': 'HIGH',
+                'category': 'Content Structure',
+                'issue': f"Multiple H1 headings ({self.results['h1_count']})",
+                'h1_list': self.results['h1_list'],
+                'fix': 'Use only ONE H1 per page'
             })
         
-        if high:
-            action_plan.append({
-                'phase': 'This Week',
-                'priority': 'HIGH',
-                'tasks': high,
-                'estimated_time': f'{len(high) * 20} minutes'
+        # Image issues
+        if self.results['images_without_alt']:
+            issues.append({
+                'severity': 'CRITICAL',
+                'category': 'Images',
+                'issue': f"{len(self.results['images_without_alt'])} images missing alt text",
+                'count': len(self.results['images_without_alt']),
+                'details_key': 'images_without_alt'
             })
         
-        if medium:
-            action_plan.append({
-                'phase': 'This Month',
-                'priority': 'MEDIUM',
-                'tasks': medium,
-                'estimated_time': f'{len(medium) * 30} minutes'
+        # Content issues
+        if self.results['word_count'] < 300:
+            issues.append({
+                'severity': 'HIGH',
+                'category': 'Content Quality',
+                'issue': f"Thin content ({self.results['word_count']} words)",
+                'target': 'Minimum 500 words, ideally 1000+'
             })
         
-        return action_plan
+        # Schema issues
+        if not self.results['schema_json_ld'] and not self.results['schema_microdata']:
+            issues.append({
+                'severity': 'MEDIUM',
+                'category': 'Structured Data',
+                'issue': 'No Schema.org markup found',
+                'recommendation': 'Add structured data for rich snippets'
+            })
+        
+        # Canonical issues
+        if not self.results['canonical']:
+            issues.append({
+                'severity': 'HIGH',
+                'category': 'Technical SEO',
+                'issue': 'Missing canonical URL',
+                'fix': f'<link rel="canonical" href="{self.url}">'
+            })
+        
+        # Open Graph issues
+        if not self.results['og_tags']:
+            issues.append({
+                'severity': 'MEDIUM',
+                'category': 'Social Media',
+                'issue': 'Missing Open Graph tags',
+                'recommendation': 'Add OG tags for better social sharing'
+            })
+        
+        self.results['issues'] = issues
     
     def calculate_score(self):
-        """Calculate SEO score"""
-        total_issues = len(self.results['issues'])
+        """Calculate overall SEO score"""
         critical = len([i for i in self.results['issues'] if i['severity'] == 'CRITICAL'])
         high = len([i for i in self.results['issues'] if i['severity'] == 'HIGH'])
         medium = len([i for i in self.results['issues'] if i['severity'] == 'MEDIUM'])
         
-        # Weighted scoring
         penalty = (critical * 15) + (high * 10) + (medium * 5)
         score = max(0, 100 - penalty)
         
         self.results['overall_score'] = score
     
-    def run_audit(self):
-        """Run complete WordPress SEO audit"""
+    def run_complete_audit(self):
+        """Run complete SEO audit"""
         if not self.fetch_page():
             return self.results
         
-        with st.spinner('🔍 Detecting WordPress...'):
+        with st.spinner('🔍 Extracting all meta tags...'):
+            self.extract_all_metas()
+            time.sleep(0.1)
+        
+        with st.spinner('🔗 Analyzing all links...'):
+            self.extract_all_links()
+            time.sleep(0.1)
+        
+        with st.spinner('📜 Scanning scripts...'):
+            self.extract_all_scripts()
+            time.sleep(0.1)
+        
+        with st.spinner('📋 Checking SEO basics...'):
+            self.check_basic_seo()
+            time.sleep(0.1)
+        
+        with st.spinner('📰 Analyzing headers...'):
+            self.analyze_headers()
+            time.sleep(0.1)
+        
+        with st.spinner('🖼️ Analyzing images...'):
+            self.analyze_images()
+            time.sleep(0.1)
+        
+        with st.spinner('🔗 Analyzing links...'):
+            self.analyze_links()
+            time.sleep(0.1)
+        
+        with st.spinner('📱 Extracting social media tags...'):
+            self.extract_og_tags()
+            self.extract_twitter_tags()
+            time.sleep(0.1)
+        
+        with st.spinner('🏷️ Extracting Schema.org markup...'):
+            self.extract_schema()
+            time.sleep(0.1)
+        
+        with st.spinner('🔧 Detecting WordPress...'):
             self.detect_wordpress()
             time.sleep(0.1)
         
-        with st.spinner('📝 Checking meta tags...'):
-            self.check_meta_tags()
+        with st.spinner('📝 Analyzing content...'):
+            self.analyze_content()
             time.sleep(0.1)
         
-        with st.spinner('📋 Analyzing headings...'):
-            self.check_headings_detailed()
+        with st.spinner('🤖 Generating AI suggestions...'):
+            self.generate_ai_suggestions()
+            self.generate_fallback_suggestions()
             time.sleep(0.1)
         
-        with st.spinner('🖼️ Scanning all images...'):
-            self.check_images_detailed()
-            time.sleep(0.1)
-        
-        with st.spinner('🔗 Checking all links...'):
-            self.check_links_detailed()
-            time.sleep(0.1)
-        
-        with st.spinner('🔧 WordPress-specific checks...'):
-            self.check_wordpress_specific()
-            time.sleep(0.1)
-        
-        with st.spinner('⚡ Performance analysis...'):
-            self.check_performance()
-            time.sleep(0.1)
-        
-        with st.spinner('📱 Mobile optimization...'):
-            self.check_mobile_optimization()
-            time.sleep(0.1)
-        
-        with st.spinner('🔒 Security checks...'):
-            self.check_https()
+        with st.spinner('⚠️ Identifying issues...'):
+            self.identify_issues()
             time.sleep(0.1)
         
         with st.spinner('📊 Calculating score...'):
@@ -792,379 +826,386 @@ class WordPressSEOAuditor:
 
 # ==================== UI FUNCTIONS ====================
 
-def render_wordpress_info(results):
-    """Render WordPress detection info"""
-    if results['wordpress_detected']:
-        st.success("✅ WordPress Site Detected!")
-        
-        col1, col2, col3 = st.columns(3)
+def render_summary_table(results):
+    """Render summary table like Chrome extension"""
+    st.markdown("### 📊 SEO Summary")
+    
+    summary_data = {
+        'Element': ['Title', 'Description', 'Keywords', 'URL', 'Canonical', 'Robots Tag', 'Language', 'H1/H2/H3/H4/H5/H6', 'Images', 'Links'],
+        'Status': [
+            f"{results['title_length']} characters" if results['title'] else '❌ Missing',
+            f"{results['meta_description_length']} characters" if results['meta_description'] else '❌ Missing',
+            '❌ Keywords are missing!' if not results['suggested_keywords'] else f"✅ {len(results['suggested_keywords'])} suggested",
+            results['url'],
+            results['canonical'] if results['canonical'] else '❌ Missing',
+            results['robots'] if results['robots'] else 'Not set',
+            results['lang'] if results['lang'] else 'Not set',
+            f"{results['h1_count']}/{len([h for h in results['headers_structure'] if h['level']=='H2'])}/{len([h for h in results['headers_structure'] if h['level']=='H3'])}/...",
+            str(results['total_images']),
+            str(results['total_links'])
+        ]
+    }
+    
+    df = pd.DataFrame(summary_data)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+def render_ai_suggestions(results):
+    """Render AI-powered suggestions"""
+    st.markdown("### 🤖 AI-Powered SEO Suggestions (2026 Standards)")
+    
+    # Title suggestion
+    if results['suggested_title']:
+        st.markdown("#### 📝 Suggested Title")
+        col1, col2 = st.columns(2)
         
         with col1:
-            version = results.get('wordpress_version', 'Unknown')
-            st.metric("WordPress Version", version)
+            st.markdown("**Current:**")
+            st.code(results['title'] or '[None]', language='html')
+            st.caption(f"Length: {results['title_length']} characters")
         
         with col2:
-            theme = results.get('wordpress_theme', 'Unknown')
-            st.metric("Active Theme", theme)
-        
-        with col3:
-            plugin_count = len(results.get('wordpress_plugins', []))
-            st.metric("Plugins Detected", plugin_count)
-        
-        if results.get('wordpress_plugins'):
-            with st.expander("🔌 Detected Plugins"):
-                plugins = results['wordpress_plugins']
-                for i in range(0, len(plugins), 3):
-                    cols = st.columns(3)
-                    for j, col in enumerate(cols):
-                        if i + j < len(plugins):
-                            col.markdown(f"• {plugins[i + j]}")
-    else:
-        st.info("ℹ️ Not a WordPress site (or WordPress is hidden)")
-
-def render_detailed_issues(results):
-    """Render issues with full source URLs"""
+            st.markdown("**Suggested:**")
+            st.code(results['suggested_title'], language='html')
+            st.caption(f"Length: {len(results['suggested_title'])} characters")
+            
+            if st.button("📋 Copy Suggested Title"):
+                st.success("✅ Copied!")
     
-    for issue in results['issues']:
-        severity = issue['severity']
+    # Description suggestion
+    if results['suggested_description']:
+        st.markdown("#### 📄 Suggested Meta Description")
+        col1, col2 = st.columns(2)
         
-        # Color coding
-        if severity == 'CRITICAL':
-            badge_color = "🔴"
-            expander_open = True
-        elif severity == 'HIGH':
-            badge_color = "🟠"
-            expander_open = False
-        elif severity == 'MEDIUM':
-            badge_color = "🟡"
-            expander_open = False
+        with col1:
+            st.markdown("**Current:**")
+            st.code(results['meta_description'] or '[None]', language='html')
+            st.caption(f"Length: {results['meta_description_length']} characters")
+        
+        with col2:
+            st.markdown("**Suggested:**")
+            st.code(results['suggested_description'], language='html')
+            st.caption(f"Length: {len(results['suggested_description'])} characters")
+            
+            if st.button("📋 Copy Suggested Description"):
+                st.success("✅ Copied!")
+    
+    # Keyword suggestions
+    if results['suggested_keywords']:
+        st.markdown("#### 🎯 Suggested Keywords")
+        st.markdown("**Use these keywords in your content, title, and meta description:**")
+        
+        for kw in results['suggested_keywords']:
+            st.markdown(f'<span class="keyword-badge">{kw}</span>', unsafe_allow_html=True)
+        
+        st.markdown("")
+        
+        # Download keywords
+        keywords_text = '\n'.join(results['suggested_keywords'])
+        st.download_button(
+            "📥 Download Keywords",
+            keywords_text,
+            f"keywords_{datetime.now().strftime('%Y%m%d')}.txt",
+            "text/plain"
+        )
+    
+    # Content improvements
+    if results['content_improvements']:
+        st.markdown("#### ✨ Content Improvement Recommendations")
+        for i, improvement in enumerate(results['content_improvements'], 1):
+            st.markdown(f"**{i}.** {improvement}")
+    
+    # AI Content Score
+    if results['ai_content_score'] > 0:
+        st.markdown("#### 📈 AI Content Quality Score")
+        
+        score = results['ai_content_score']
+        
+        if score >= 80:
+            color = "#28a745"
+            status = "Excellent"
+        elif score >= 60:
+            color = "#ffc107"
+            status = "Good"
         else:
-            badge_color = "🔵"
-            expander_open = False
+            color = "#dc3545"
+            status = "Needs Improvement"
         
-        with st.expander(f"{badge_color} {severity}: {issue['issue']}", expanded=expander_open):
-            
-            # WordPress Fix Instructions
-            if issue.get('wordpress_fix'):
-                st.markdown("### 🔧 How to Fix in WordPress:")
-                for step in issue['wordpress_fix']:
-                    if step.startswith('•'):
-                        st.markdown(f"  {step}")
-                    else:
-                        st.markdown(step)
-            
-            # Show detailed listings with URLs
-            if issue.get('details_key'):
-                key = issue['details_key']
-                items = results.get(key, [])
-                
-                if items:
-                    st.markdown(f"### 📋 Complete List ({len(items)} items):")
-                    
-                    # Create DataFrame for download
-                    if key == 'images_missing_alt':
-                        st.markdown("**All images missing alt text:**")
-                        df_data = []
-                        for idx, img in enumerate(items, 1):
-                            st.markdown(f"""
-                            **{idx}. Image URL:**
-                            ```
-                            {img['url']}
-                            ```
-                            - Location: {img['location']}
-                            - Parent class: {img['parent_class']}
-                            """)
-                            df_data.append({
-                                'Image URL': img['url'],
-                                'Location': img['location'],
-                                'Parent Class': img['parent_class'],
-                                'Fix': 'Add alt text in WordPress Media Library'
-                            })
-                        
-                        # Download button
-                        if df_data:
-                            df = pd.DataFrame(df_data)
-                            csv = df.to_csv(index=False)
-                            st.download_button(
-                                "📥 Download Full List (CSV)",
-                                csv,
-                                f"images_missing_alt_{datetime.now().strftime('%Y%m%d')}.csv",
-                                "text/csv",
-                                key=f"download_{key}"
-                            )
-                    
-                    elif key == 'images_non_webp':
-                        st.markdown("**Images to convert to WebP:**")
-                        df_data = []
-                        for idx, img in enumerate(items[:20], 1):  # Show first 20
-                            st.markdown(f"{idx}. `{img['url']}`")
-                            df_data.append({
-                                'Image URL': img['url'],
-                                'Current Format': img['current_format'],
-                                'Recommendation': img['recommendation']
-                            })
-                        
-                        if len(items) > 20:
-                            st.info(f"Showing first 20 of {len(items)} images. Download CSV for complete list.")
-                        
-                        df = pd.DataFrame(df_data)
-                        csv = df.to_csv(index=False)
-                        st.download_button(
-                            "📥 Download Full List (CSV)",
-                            csv,
-                            f"images_to_convert_{datetime.now().strftime('%Y%m%d')}.csv",
-                            "text/csv",
-                            key=f"download_{key}"
-                        )
-                    
-                    elif key == 'images_large_size':
-                        st.markdown("**Oversized images to optimize:**")
-                        df_data = []
-                        for idx, img in enumerate(items, 1):
-                            st.markdown(f"{idx}. `{img['url']}` - Size: {img['width']}x{img['height']}px")
-                            df_data.append({
-                                'Image URL': img['url'],
-                                'Width': img['width'],
-                                'Height': img['height'],
-                                'Recommendation': img['recommendation']
-                            })
-                        
-                        df = pd.DataFrame(df_data)
-                        csv = df.to_csv(index=False)
-                        st.download_button(
-                            "📥 Download List (CSV)",
-                            csv,
-                            f"large_images_{datetime.now().strftime('%Y%m%d')}.csv",
-                            "text/csv",
-                            key=f"download_{key}"
-                        )
-                    
-                    elif key == 'broken_links':
-                        st.markdown("**Broken or invalid links:**")
-                        df_data = []
-                        for idx, link in enumerate(items, 1):
-                            st.markdown(f"""
-                            **{idx}. Issue:** {link['type']}
-                            - Anchor text: "{link['anchor_text']}"
-                            - Fix: {link['fix']}
-                            ```html
-                            {link.get('html', '')}
-                            ```
-                            """)
-                            df_data.append({
-                                'Issue': link['type'],
-                                'URL': link['url'],
-                                'Anchor Text': link['anchor_text'],
-                                'Fix': link['fix']
-                            })
-                        
-                        df = pd.DataFrame(df_data)
-                        csv = df.to_csv(index=False)
-                        st.download_button(
-                            "📥 Download Broken Links (CSV)",
-                            csv,
-                            f"broken_links_{datetime.now().strftime('%Y%m%d')}.csv",
-                            "text/csv",
-                            key=f"download_{key}"
-                        )
-                    
-                    elif key == 'h1_tags_list':
-                        st.markdown("**All H1 tags found:**")
-                        for idx, h1 in enumerate(items, 1):
-                            st.markdown(f"{idx}. \"{h1['text']}\"")
-                            st.code(h1['html'], language='html')
-                        
-                        st.markdown("**Fix:** Keep only ONE H1. Change others to H2 or H3 in WordPress editor.")
-            
-            # Plugin recommendations
-            if issue.get('plugin_recommendation'):
-                st.success(f"💡 Recommended Plugin: {issue['plugin_recommendation']}")
-            
-            # Benefit
-            if issue.get('benefit'):
-                st.info(f"✨ Benefit: {issue['benefit']}")
-            
-            # SEO Impact
-            if issue.get('seo_impact'):
-                st.warning(f"⚠️ SEO Impact: {issue['seo_impact']}")
+        st.markdown(f"""
+        <div style="background: {color}; color: white; padding: 1rem; border-radius: 8px; text-align: center;">
+            <h2 style="margin: 0;">{score}/100</h2>
+            <p style="margin: 0;">{status}</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-def render_all_links(results):
-    """Render complete link inventory"""
-    st.markdown("### 🔗 Complete Link Inventory")
+def render_all_metas(results):
+    """Render all meta tags like Chrome extension"""
+    st.markdown("### 🏷️ ALL META TAGS")
     
-    tab1, tab2 = st.tabs(["Internal Links", "External Links"])
+    if results['all_metas']:
+        for meta in results['all_metas']:
+            if meta['type'] == 'charset':
+                st.code(f"charset: {meta['value']}", language='text')
+            elif meta['type'] == 'name':
+                st.code(f"{meta['name']}: {meta['content']}", language='text')
+            elif meta['type'] == 'property':
+                st.code(f"{meta['property']}: {meta['content']}", language='text')
+            elif meta['type'] == 'http-equiv':
+                st.code(f"{meta['http-equiv']}: {meta['content']}", language='text')
+    else:
+        st.info("No meta tags found")
+
+def render_all_links_rel(results):
+    """Render all link tags"""
+    st.markdown("### 🔗 ALL LINKS (rel)")
+    
+    if results['all_links']:
+        for link in results['all_links']:
+            if link['rel']:
+                href_display = link['href'][:80] if link['href'] else '[No href]'
+                st.code(f"{link['rel']}: {href_display}", language='text')
+    else:
+        st.info("No link tags found")
+
+def render_keyword_density(results):
+    """Render keyword density analysis"""
+    st.markdown("### 🔑 Keyword Density Analysis")
+    
+    if results['keyword_density']:
+        df = pd.DataFrame(results['keyword_density'])
+        
+        # Separate by type
+        single = df[df['type'] == 'single'].head(15)
+        phrases_2 = df[df['type'] == '2-word'].head(10)
+        phrases_3 = df[df['type'] == '3-word'].head(5)
+        
+        tab1, tab2, tab3 = st.tabs(["Single Keywords", "2-Word Phrases", "3-Word Phrases"])
+        
+        with tab1:
+            if not single.empty:
+                st.dataframe(single[['keyword', 'count', 'density']], use_container_width=True, hide_index=True)
+        
+        with tab2:
+            if not phrases_2.empty:
+                st.dataframe(phrases_2[['keyword', 'count', 'density']], use_container_width=True, hide_index=True)
+        
+        with tab3:
+            if not phrases_3.empty:
+                st.dataframe(phrases_3[['keyword', 'count', 'density']], use_container_width=True, hide_index=True)
+    else:
+        st.info("No keywords extracted")
+
+def render_headers_hierarchy(results):
+    """Render complete headers structure"""
+    st.markdown("### 📋 Complete Headers Hierarchy")
+    
+    if results['headers_structure']:
+        st.markdown("**All headers in order of appearance:**")
+        
+        for header in results['headers_structure']:
+            indent = "  " * (int(header['level'][1]) - 1)
+            st.markdown(f"`{header['level']}` {indent}{header['text']}")
+        
+        # Table view
+        st.markdown("**Table View:**")
+        df = pd.DataFrame(results['headers_structure'])
+        st.dataframe(df[['level', 'text', 'length']], use_container_width=True, hide_index=True)
+        
+        # Download
+        csv = df.to_csv(index=False)
+        st.download_button(
+            "📥 Download Headers Structure",
+            csv,
+            f"headers_{datetime.now().strftime('%Y%m%d')}.csv",
+            "text/csv"
+        )
+    else:
+        st.warning("No headers found")
+
+def render_images_complete(results):
+    """Render complete image analysis"""
+    st.markdown("### 🖼️ Complete Image Analysis")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Total Images", results['total_images'])
+    with col2:
+        st.metric("With Alt", results['images_with_alt'])
+    with col3:
+        st.metric("Missing Alt", len(results['images_without_alt']))
+    
+    if results['images_without_alt']:
+        st.markdown("#### ❌ Images Missing Alt Text")
+        
+        df_data = []
+        for idx, img in enumerate(results['images_without_alt'], 1):
+            st.markdown(f"**{idx}.** `{img['url']}`")
+            df_data.append({
+                'No.': idx,
+                'Image URL': img['url'],
+                'Fix': 'Add alt text in WordPress Media Library'
+            })
+        
+        df = pd.DataFrame(df_data)
+        csv = df.to_csv(index=False)
+        st.download_button(
+            "📥 Download List of Images Missing Alt",
+            csv,
+            f"images_missing_alt_{datetime.now().strftime('%Y%m%d')}.csv",
+            "text/csv"
+        )
+
+def render_links_complete(results):
+    """Render complete link analysis"""
+    st.markdown("### 🔗 Complete Link Analysis")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Total Links", results['total_links'])
+    with col2:
+        st.metric("Internal", len(results['internal_links']))
+    with col3:
+        st.metric("External", len(results['external_links']))
+    
+    tab1, tab2, tab3 = st.tabs(["Internal Links", "External Links", "Anchor Links"])
     
     with tab1:
-        internal = results.get('internal_links_list', [])
-        if internal:
-            st.markdown(f"**Found {len(internal)} internal links:**")
-            
+        if results['internal_links']:
             df_data = []
-            for idx, link in enumerate(internal, 1):
+            for idx, link in enumerate(results['internal_links'], 1):
                 df_data.append({
                     'No.': idx,
                     'URL': link['url'],
                     'Anchor Text': link['anchor_text'],
-                    'Location': link['location_in_page'],
-                    'NoFollow': 'Yes' if link['nofollow'] else 'No'
+                    'Title': link['title']
                 })
             
             df = pd.DataFrame(df_data)
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, use_container_width=True, hide_index=True)
             
             csv = df.to_csv(index=False)
             st.download_button(
-                "📥 Download Internal Links (CSV)",
+                "📥 Download Internal Links",
                 csv,
                 f"internal_links_{datetime.now().strftime('%Y%m%d')}.csv",
                 "text/csv"
             )
-        else:
-            st.warning("No internal links found - Add links to related posts/pages!")
     
     with tab2:
-        external = results.get('external_links_list', [])
-        if external:
-            st.markdown(f"**Found {len(external)} external links:**")
-            
+        if results['external_links']:
             df_data = []
-            for idx, link in enumerate(external, 1):
+            for idx, link in enumerate(results['external_links'], 1):
                 df_data.append({
                     'No.': idx,
                     'URL': link['url'],
                     'Anchor Text': link['anchor_text'],
-                    'NoFollow': 'Yes' if link['nofollow'] else 'No',
-                    'Opens In': 'New Tab' if link['target'] == '_blank' else 'Same Tab'
+                    'Rel': ', '.join(link['rel']),
+                    'Target': link['target']
                 })
             
             df = pd.DataFrame(df_data)
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, use_container_width=True, hide_index=True)
             
             csv = df.to_csv(index=False)
             st.download_button(
-                "📥 Download External Links (CSV)",
+                "📥 Download External Links",
                 csv,
                 f"external_links_{datetime.now().strftime('%Y%m%d')}.csv",
                 "text/csv"
             )
-        else:
-            st.info("No external links found")
+    
+    with tab3:
+        if results['anchor_links']:
+            for idx, link in enumerate(results['anchor_links'], 1):
+                st.markdown(f"{idx}. `{link['href']}` - {link['anchor_text']}")
 
-def render_all_headings(results):
-    """Render complete heading structure"""
-    st.markdown("### 📋 Complete Heading Structure")
+def render_social_tags(results):
+    """Render Open Graph and Twitter Cards"""
+    st.markdown("### 📱 Social Media Tags")
     
-    headings = results.get('all_headings', [])
+    col1, col2 = st.columns(2)
     
-    if headings:
-        df_data = []
-        for heading in headings:
-            df_data.append({
-                'Level': heading['level'],
-                'Text': heading['text'],
-                'Length': heading['length'],
-                'Parent Class': heading['parent_class']
-            })
-        
-        df = pd.DataFrame(df_data)
-        st.dataframe(df, use_container_width=True)
-        
-        # Visual hierarchy
-        st.markdown("**Hierarchy Visualization:**")
-        for heading in headings:
-            indent = "  " * (int(heading['level'][1]) - 1)
-            st.markdown(f"{indent}**{heading['level']}:** {heading['text'][:80]}")
-        
-        csv = df.to_csv(index=False)
-        st.download_button(
-            "📥 Download Heading Structure (CSV)",
-            csv,
-            f"headings_{datetime.now().strftime('%Y%m%d')}.csv",
-            "text/csv"
-        )
+    with col1:
+        st.markdown("#### Facebook / Open Graph")
+        if results['og_tags']:
+            for prop, content in results['og_tags'].items():
+                st.code(f"{prop}: {content[:100]}", language='text')
+        else:
+            st.warning("No Open Graph tags found")
+    
+    with col2:
+        st.markdown("#### Twitter Cards")
+        if results['twitter_tags']:
+            for name, content in results['twitter_tags'].items():
+                st.code(f"{name}: {content[:100]}", language='text')
+        else:
+            st.warning("No Twitter Card tags found")
+
+def render_schema_markup(results):
+    """Render Schema.org markup"""
+    st.markdown("### 🏷️ Schema.org Structured Data")
+    
+    if results['schema_json_ld']:
+        st.markdown("#### JSON-LD")
+        for idx, schema in enumerate(results['schema_json_ld'], 1):
+            schema_type = schema.get('@type', 'Unknown')
+            st.markdown(f"**{idx}. Type:** `{schema_type}`")
+            with st.expander("View full schema"):
+                st.json(schema)
     else:
-        st.warning("No headings found on page")
-
-def render_action_plan(action_plan):
-    """Render WordPress action plan"""
-    st.markdown("## 🎯 Your WordPress SEO Action Plan")
+        st.info("No JSON-LD schemas found")
     
-    for phase in action_plan:
-        priority = phase['priority']
-        
-        if priority == 'CRITICAL':
-            color = "#dc3545"
-            icon = "🔴"
-        elif priority == 'HIGH':
-            color = "#fd7e14"
-            icon = "🟠"
-        else:
-            color = "#ffc107"
-            icon = "🟡"
-        
-        st.markdown(f"### {icon} {phase['phase']}")
-        st.markdown(f"*Estimated time: {phase['estimated_time']}*")
-        
-        for idx, task in enumerate(phase['tasks'], 1):
-            with st.expander(f"{idx}. {task['issue']}", expanded=False):
-                st.markdown(f"**Category:** {task['category']}")
-                
-                if task.get('wordpress_fix'):
-                    st.markdown("**WordPress Fix Steps:**")
-                    for step in task['wordpress_fix']:
-                        st.markdown(step)
-                
-                if task.get('benefit'):
-                    st.success(f"**Benefit:** {task['benefit']}")
+    if results['schema_microdata']:
+        st.markdown("#### Microdata")
+        for idx, schema in enumerate(results['schema_microdata'], 1):
+            st.markdown(f"**{idx}.** {schema['itemtype']}")
 
 # ==================== MAIN APP ====================
 
 def main():
-    st.markdown('<h1 class="main-header">🔍 WordPress SEO Audit Tool</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="text-align: center; color: #666; font-size: 1.1rem;">Complete source URL listings • WordPress-specific fixes • Ready for implementation</p>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">🔍 Complete SEO Audit Tool</h1>', unsafe_allow_html=True)
+    st.markdown('<p style="text-align: center; color: #666; font-size: 1.1rem;">Chrome Extension Detail + AI Content Analysis + 2026 Standards</p>', unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
-        st.markdown("### 🎯 WordPress Optimized")
-        st.success("""
-        **Perfect for:**
-        - WordPress site owners
-        - Bloggers
-        - Agencies
-        - Freelancers
-        - WooCommerce stores
+        st.markdown("### ⚙️ Settings")
         
-        **Provides:**
-        - Full image URLs
-        - All broken links
-        - Plugin recommendations
-        - Step-by-step fixes
-        - Downloadable lists
-        """)
+        openai_api_key = st.text_input(
+            "OpenAI API Key (Optional)",
+            type="password",
+            help="Add your OpenAI API key for AI-powered content analysis and suggestions"
+        )
+        
+        if openai_api_key:
+            st.success("✅ AI Analysis Enabled")
+        else:
+            st.info("💡 Add OpenAI API key for AI suggestions")
         
         st.markdown("---")
-        st.markdown("### 📥 What You Get")
-        st.info("""
-        1. **Complete Image List**
-           - All images missing alt text
-           - Full URLs
-           - Download as CSV
+        st.markdown("### 📊 What This Tool Provides")
+        st.success("""
+        **Chrome Extension Level:**
+        - All meta tags
+        - All link tags
+        - All scripts
+        - Complete headers
+        - Full link inventory
+        - OG & Twitter cards
+        - Schema.org markup
         
-        2. **All Links Inventory**
-           - Internal links
-           - External links
-           - Broken links
-           - Download lists
+        **AI-Powered (with API key):**
+        - Suggested title
+        - Suggested description
+        - Keyword recommendations
+        - Content improvements
+        - Quality scoring
         
-        3. **WordPress Fixes**
-           - Exact plugin names
-           - Menu locations
-           - Settings to change
-        
-        4. **Action Plan**
-           - Priority order
-           - Time estimates
-           - Step-by-step guide
+        **WordPress Optimized:**
+        - Plugin detection
+        - Complete URL listings
+        - Downloadable CSVs
+        - Step-by-step fixes
         """)
     
     # Main input
@@ -1172,27 +1213,22 @@ def main():
     
     with col1:
         url_input = st.text_input(
-            "Enter your WordPress site URL:",
-            placeholder="https://yourwordpresssite.com",
-            help="Enter your WordPress website URL"
+            "Enter URL to Audit:",
+            placeholder="https://yourwebsite.com",
+            help="Enter the full URL"
         )
     
     with col2:
         st.markdown("<br>", unsafe_allow_html=True)
-        analyze_button = st.button("🚀 Audit Site", type="primary", use_container_width=True)
+        analyze_button = st.button("🚀 Complete Audit", type="primary", use_container_width=True)
     
     # Run audit
     if analyze_button and url_input:
         if not url_input.startswith(('http://', 'https://')):
             url_input = 'https://' + url_input
         
-        auditor = WordPressSEOAuditor(url_input)
-        results = auditor.run_audit()
-        
-        st.markdown("---")
-        
-        # WordPress Detection
-        render_wordpress_info(results)
+        auditor = CompleteSEOAuditor(url_input, openai_api_key if openai_api_key else None)
+        results = auditor.run_complete_audit()
         
         st.markdown("---")
         
@@ -1222,149 +1258,151 @@ def main():
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # Issue count
-        critical = len([i for i in results['issues'] if i['severity'] == 'CRITICAL'])
-        high = len([i for i in results['issues'] if i['severity'] == 'HIGH'])
-        medium = len([i for i in results['issues'] if i['severity'] == 'MEDIUM'])
-        
-        col1, col2, col3 = st.columns(3)
-        col1.metric("🔴 Critical", critical, "Fix ASAP")
-        col2.metric("🟠 High Priority", high, "This Week")
-        col3.metric("🟡 Medium", medium, "This Month")
+        # Summary table
+        render_summary_table(results)
         
         st.markdown("---")
         
+        # AI Suggestions (if enabled)
+        if openai_api_key or results['suggested_keywords']:
+            render_ai_suggestions(results)
+            st.markdown("---")
+        
         # Tabs
         tabs = st.tabs([
-            "🚨 Issues & Fixes",
-            "🎯 Action Plan",
-            "🖼️ All Images",
+            "📊 Summary",
+            "🏷️ All Metas",
             "🔗 All Links",
-            "📋 Headings",
-            "📥 Download Reports"
+            "📋 Headers",
+            "🖼️ Images",
+            "🔗 Link Analysis",
+            "🔑 Keywords",
+            "📱 Social Tags",
+            "🏷️ Schema",
+            "⚠️ Issues",
+            "📥 Export"
         ])
         
         with tabs[0]:
-            if results['issues']:
-                render_detailed_issues(results)
-            else:
-                st.success("🎉 No issues found! Your WordPress site SEO is excellent!")
+            st.markdown("### 📊 Quick Overview")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Word Count", results['word_count'])
+            col2.metric("Images", results['total_images'])
+            col3.metric("Links", results['total_links'])
+            col4.metric("H1 Tags", results['h1_count'])
+            
+            if results['wordpress_detected']:
+                st.markdown("---")
+                st.success(f"✅ WordPress {results['wordpress_version'] or 'Detected'}")
+                st.info(f"Theme: {results['wordpress_theme'] or 'Unknown'}")
+                if results['wordpress_plugins']:
+                    st.info(f"Plugins: {len(results['wordpress_plugins'])} detected")
         
         with tabs[1]:
-            action_plan = auditor.generate_wordpress_action_plan()
-            if action_plan:
-                render_action_plan(action_plan)
-            else:
-                st.success("✅ No action needed!")
+            render_all_metas(results)
         
         with tabs[2]:
-            st.markdown("## 🖼️ Complete Image Analysis")
-            
-            total_images = (
-                len(results['images_missing_alt']) +
-                len(results['images_empty_alt']) +
-                len(results['images_no_title']) +
-                len(results['images_large_size']) +
-                len(results['images_non_webp'])
-            )
-            
-            if total_images > 0:
-                st.info(f"Found image optimization opportunities:")
-                
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Missing Alt", len(results['images_missing_alt']))
-                col2.metric("Large Size", len(results['images_large_size']))
-                col3.metric("Need WebP", len(results['images_non_webp']))
-                
-                # Show lists
-                if results['images_missing_alt']:
-                    with st.expander(f"📋 Images Missing Alt Text ({len(results['images_missing_alt'])})", expanded=True):
-                        df_data = []
-                        for img in results['images_missing_alt']:
-                            st.markdown(f"**URL:** `{img['url']}`")
-                            st.caption(f"Location: {img['location']}")
-                            df_data.append({
-                                'Image URL': img['url'],
-                                'Location': img['location'],
-                                'Fix': 'Add in WP Media Library'
-                            })
-                        
-                        df = pd.DataFrame(df_data)
-                        csv = df.to_csv(index=False)
-                        st.download_button(
-                            "📥 Download List",
-                            csv,
-                            f"images_missing_alt_{datetime.now().strftime('%Y%m%d')}.csv",
-                            "text/csv"
-                        )
-            else:
-                st.success("✅ All images are optimized!")
+            render_all_links_rel(results)
         
         with tabs[3]:
-            render_all_links(results)
+            render_headers_hierarchy(results)
         
         with tabs[4]:
-            render_all_headings(results)
+            render_images_complete(results)
         
         with tabs[5]:
-            st.markdown("## 📥 Download Complete Reports")
+            render_links_complete(results)
+        
+        with tabs[6]:
+            render_keyword_density(results)
+        
+        with tabs[7]:
+            render_social_tags(results)
+        
+        with tabs[8]:
+            render_schema_markup(results)
+        
+        with tabs[9]:
+            st.markdown("### ⚠️ Issues Found")
             
-            col1, col2 = st.columns(2)
+            if results['issues']:
+                for issue in results['issues']:
+                    severity = issue['severity']
+                    
+                    if severity == 'CRITICAL':
+                        badge = "🔴"
+                    elif severity == 'HIGH':
+                        badge = "🟠"
+                    else:
+                        badge = "🟡"
+                    
+                    with st.expander(f"{badge} {severity}: {issue['issue']}"):
+                        if issue.get('current'):
+                            st.markdown("**Current:**")
+                            st.code(issue['current'], language='html')
+                        
+                        if issue.get('suggested'):
+                            st.markdown("**Suggested:**")
+                            st.code(issue['suggested'], language='html')
+                        
+                        if issue.get('fix'):
+                            st.markdown("**Fix:**")
+                            st.code(issue['fix'], language='html')
+                        
+                        if issue.get('recommendation'):
+                            st.info(issue['recommendation'])
+            else:
+                st.success("🎉 No issues found!")
+        
+        with tabs[10]:
+            st.markdown("### 📥 Export Reports")
             
-            with col1:
-                # Summary report
-                summary_text = f"""
-WORDPRESS SEO AUDIT REPORT
+            # Full report
+            report = f"""
+COMPLETE SEO AUDIT REPORT
 ========================
 
-Site: {results['url']}
+URL: {results['url']}
 Date: {results['timestamp']}
 Score: {results['overall_score']}/100
 
-WordPress Info:
-- Detected: {'Yes' if results['wordpress_detected'] else 'No'}
-- Version: {results.get('wordpress_version', 'Unknown')}
-- Theme: {results.get('wordpress_theme', 'Unknown')}
-- Plugins: {len(results.get('wordpress_plugins', []))}
+BASIC SEO:
+- Title: {results['title']} ({results['title_length']} chars)
+- Description: {results['meta_description']} ({results['meta_description_length']} chars)
+- Canonical: {results['canonical']}
+- Language: {results['lang']}
 
-Issues Found:
-- Critical: {critical}
-- High: {high}
-- Medium: {medium}
+CONTENT:
+- Word Count: {results['word_count']}
+- Paragraphs: {results['paragraph_count']}
+- Sentences: {results['sentence_count']}
 
-Image Issues:
-- Missing alt text: {len(results['images_missing_alt'])}
-- Need WebP: {len(results['images_non_webp'])}
-- Oversized: {len(results['images_large_size'])}
+STRUCTURE:
+- H1 Tags: {results['h1_count']}
+- Total Headers: {len(results['headers_structure'])}
+- Images: {results['total_images']}
+- Links: {results['total_links']}
 
-Links:
-- Internal: {len(results['internal_links_list'])}
-- External: {len(results['external_links_list'])}
-- Broken: {len(results['broken_links'])}
+AI SUGGESTIONS:
+- Suggested Title: {results['suggested_title']}
+- Suggested Description: {results['suggested_description']}
+- Keywords: {', '.join(results['suggested_keywords'])}
 
-Priority Actions:
-{chr(10).join([f"- {issue['issue']}" for issue in results['issues'][:10]])}
+ISSUES FOUND: {len(results['issues'])}
+{chr(10).join([f"- {issue['issue']}" for issue in results['issues']])}
+
+TOP KEYWORDS:
+{chr(10).join([f"- {kw['keyword']} ({kw['count']} times, {kw['density']})" for kw in results['keyword_density'][:15]])}
 """
-                
-                st.download_button(
-                    "📄 Download Summary Report",
-                    summary_text,
-                    f"wordpress_seo_summary_{datetime.now().strftime('%Y%m%d')}.txt",
-                    "text/plain",
-                    use_container_width=True
-                )
             
-            with col2:
-                # Create master spreadsheet
-                st.download_button(
-                    "📊 Download Master Spreadsheet",
-                    "Complete audit data available in individual tabs above",
-                    f"wordpress_seo_audit_{datetime.now().strftime('%Y%m%d')}.txt",
-                    "text/plain",
-                    use_container_width=True,
-                    disabled=True,
-                    help="Download individual CSVs from each tab above"
-                )
+            st.download_button(
+                "📄 Download Full Report",
+                report,
+                f"complete_seo_audit_{datetime.now().strftime('%Y%m%d')}.txt",
+                "text/plain",
+                use_container_width=True
+            )
     
     elif analyze_button:
         st.warning("⚠️ Please enter a URL")
@@ -1373,8 +1411,8 @@ Priority Actions:
     st.markdown("---")
     st.markdown("""
     <div style="text-align: center; color: #666; padding: 1rem;">
-        <p><strong>WordPress SEO Audit Tool</strong> - Complete source listings for practical fixes</p>
-        <p>Made for WordPress site owners • Download all lists • Implement immediately</p>
+        <p><strong>Complete SEO Audit Tool</strong> - Chrome Extension Detail + AI Analysis</p>
+        <p>All meta tags • All links • Keywords • AI suggestions • 2026 standards</p>
     </div>
     """, unsafe_allow_html=True)
 
